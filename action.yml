@@ -57,7 +57,7 @@ runs:
         echo "sha=${sha:-${{ inputs.cemu-ref }}}" >> "$GITHUB_OUTPUT"
 
     - id: cache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ${{ runner.temp }}/cemu-net/autotester
         key: cemu-net-autotester-${{ runner.os }}-${{ runner.arch }}-${{ steps.ref.outputs.sha }}
