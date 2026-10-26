@@ -1,0 +1,29 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: cemu
+        uses: ./
+        with:
+          truststore: true
+
+      - name: Autotester builds
+        run: test -x "${{ steps.cemu.outputs.autotester }}"
+
+      - name: Truststore downloaded
+        run: head -c 8 "${{ steps.cemu.outputs.truststore }}" | grep -q '\*\*TI83F\*'
+
+      - name: Calculator subnet reaches the internet through the TAP
+        run: python3 test/tapcheck.py cemu0 192.168.84.2 192.168.84.1 1.1.1.1
+
+      - name: usb-step output
+        run: test "${{ steps.cemu.outputs.usb-step }}" = "usb|eth,cemu0,dhcp=192.168.84.2/24,gw=192.168.84.1,dns=1.1.1.1"

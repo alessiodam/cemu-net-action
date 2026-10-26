@@ -1,0 +1,115 @@
+name: CEmu networked autotest
+description: Build the CEmu autotester with the emulated USB Ethernet adapter, bridge it to a NATed TAP interface and optionally run an autotest.
+branding:
+  icon: wifi
+  color: blue
+
+inputs:
+  autotest:
+    description: Autotester JSON to run. Leave empty to only set up the autotester and network.
+    default: ''
+  rom:
+    description: Path to the CE ROM, exported as AUTOTESTER_ROM.
+    default: ''
+  screenshots:
+    description: Pass -s to the autotester so it dumps a screenshot at every hash check.
+    default: 'false'
+  truststore:
+    description: Download the signed lwIP-CE truststore (lwIPCERT.8xv).
+    default: 'false'
+  cemu-repository:
+    description: CEmu repository providing the eth USB device.
+    default: alessiodam/CEmu-lwIP-CE
+  cemu-ref:
+    description: Branch, tag or commit of cemu-repository to build.
+    default: master
+  tap:
+    description: TAP interface name.
+    default: cemu0
+  host-address:
+    description: Host address and prefix on the TAP interface. The calculator uses it as its gateway.
+    default: 192.168.84.1/24
+  calc-address:
+    description: Address the built-in DHCP server leases to the calculator.
+    default: 192.168.84.2
+  dns:
+    description: DNS server handed to the calculator.
+    default: 1.1.1.1
+
+outputs:
+  autotester:
+    description: Path to the autotester binary.
+    value: ${{ steps.paths.outputs.autotester }}
+  usb-step:
+    description: Autotester sequence step that plugs the adapter in.
+    value: ${{ steps.paths.outputs.usb-step }}
+  truststore:
+    description: Path to lwIPCERT.8xv when truststore is true.
+    value: ${{ steps.paths.outputs.truststore }}
+
+runs:
+  using: composite
+  steps:
+    - id: ref
+      shell: bash
+      run: |
+        sha=$(git ls-remote "https://github.com/${{ inputs.cemu-repository }}" "${{ inputs.cemu-ref }}" | head -n1 | cut -f1)
+        echo "sha=${sha:-${{ inputs.cemu-ref }}}" >> "$GITHUB_OUTPUT"
+
+    - id: cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/cemu-net/autotester
+        key: cemu-net-autotester-${{ runner.os }}-${{ runner.arch }}-${{ steps.ref.outputs.sha }}
+
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        src="$RUNNER_TEMP/cemu-net/src"
+        rm -rf "$src"
+        git init -q "$src"
+        git -C "$src" fetch -q --depth 1 "https://github.com/${{ inputs.cemu-repository }}" "${{ steps.ref.outputs.sha }}"
+        git -C "$src" checkout -q FETCH_HEAD
+        git -C "$src" submodule update -q --init --depth 1
+        make -C "$src/core" -j"$(nproc)" >/dev/null
+        make -C "$src/tests/autotester" -j"$(nproc)" autotester >/dev/null
+        cp "$src/tests/autotester/autotester" "$RUNNER_TEMP/cemu-net/autotester"
+
+    - shell: bash
+      env:
+        TAP: ${{ inputs.tap }}
+        HOST: ${{ inputs.host-address }}
+      run: |
+        sudo ip tuntap add dev "$TAP" mode tap user "$(id -un)"
+        sudo ip addr add "$HOST" dev "$TAP"
+        sudo ip link set "$TAP" up
+        net=$(ip -o -4 route show dev "$TAP" proto kernel | cut -d' ' -f1)
+        sudo sysctl -qw net.ipv4.ip_forward=1
+        sudo iptables -t nat -A POSTROUTING -s "$net" ! -o "$TAP" -j MASQUERADE
+        sudo iptables -I FORWARD -i "$TAP" -j ACCEPT
+        sudo iptables -I FORWARD -o "$TAP" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+
+    - if: inputs.truststore == 'true'
+      shell: bash
+      run: curl -fsSL --retry 3 -o "$RUNNER_TEMP/cemu-net/lwIPCERT.8xv" https://github.com/cagscalclabs/lwip-ce/releases/download/truststore-latest/lwIPCERT.8xv
+
+    - id: paths
+      shell: bash
+      env:
+        HOST: ${{ inputs.host-address }}
+      run: |
+        echo "autotester=$RUNNER_TEMP/cemu-net/autotester" >> "$GITHUB_OUTPUT"
+        echo "usb-step=usb|eth,${{ inputs.tap }},dhcp=${{ inputs.calc-address }}/${HOST#*/},gw=${HOST%/*},dns=${{ inputs.dns }}" >> "$GITHUB_OUTPUT"
+        if [ "${{ inputs.truststore }}" = true ]; then
+          echo "truststore=$RUNNER_TEMP/cemu-net/lwIPCERT.8xv" >> "$GITHUB_OUTPUT"
+        fi
+
+    - if: inputs.autotest != ''
+      shell: bash
+      env:
+        ROM: ${{ inputs.rom }}
+      run: |
+        if [ -n "$ROM" ]; then export AUTOTESTER_ROM="$(realpath "$ROM")"; fi
+        args=()
+        if [ "${{ inputs.screenshots }}" = true ]; then args+=(-s); fi
+        "$RUNNER_TEMP/cemu-net/autotester" "${args[@]}" "$(realpath "${{ inputs.autotest }}")"
