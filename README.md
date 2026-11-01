@@ -55,6 +55,7 @@ The ROM is not provided; fetch it from your own secret storage and pass its path
 | Output | Description |
 | --- | --- |
 | `autotester` | Path to the autotester binary. |
+| `headless` | Path to `cemu-headless`, the stdin/stdout runner. Plug the adapter with `usb eth,cemu0,dhcp=...` (the `usb-step` value without `usb\|`). |
 | `usb-step` | Sequence step that plugs the adapter in with the configured addresses. |
 | `truststore` | Path to `lwIPCERT.8xv` when `truststore` is `true`. |
 

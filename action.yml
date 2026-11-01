@@ -40,6 +40,9 @@ outputs:
   autotester:
     description: Path to the autotester binary.
     value: ${{ steps.paths.outputs.autotester }}
+  headless:
+    description: Path to the cemu-headless binary.
+    value: ${{ steps.paths.outputs.headless }}
   usb-step:
     description: Autotester sequence step that plugs the adapter in.
     value: ${{ steps.paths.outputs.usb-step }}
@@ -59,8 +62,10 @@ runs:
     - id: cache
       uses: actions/cache@v6
       with:
-        path: ${{ runner.temp }}/cemu-net/autotester
-        key: cemu-net-autotester-${{ runner.os }}-${{ runner.arch }}-${{ steps.ref.outputs.sha }}
+        path: |
+          ${{ runner.temp }}/cemu-net/autotester
+          ${{ runner.temp }}/cemu-net/cemu-headless
+        key: cemu-net-bin-${{ runner.os }}-${{ runner.arch }}-${{ steps.ref.outputs.sha }}
 
     - if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
@@ -72,8 +77,8 @@ runs:
         git -C "$src" checkout -q FETCH_HEAD
         git -C "$src" submodule update -q --init --depth 1
         make -C "$src/core" -j"$(nproc)" >/dev/null
-        make -C "$src/tests/autotester" -j"$(nproc)" autotester >/dev/null
-        cp "$src/tests/autotester/autotester" "$RUNNER_TEMP/cemu-net/autotester"
+        make -C "$src/tests/autotester" -j"$(nproc)" autotester cemu-headless >/dev/null
+        cp "$src/tests/autotester/autotester" "$src/tests/autotester/cemu-headless" "$RUNNER_TEMP/cemu-net/"
 
     - shell: bash
       env:
@@ -99,6 +104,7 @@ runs:
         HOST: ${{ inputs.host-address }}
       run: |
         echo "autotester=$RUNNER_TEMP/cemu-net/autotester" >> "$GITHUB_OUTPUT"
+        echo "headless=$RUNNER_TEMP/cemu-net/cemu-headless" >> "$GITHUB_OUTPUT"
         echo "usb-step=usb|eth,${{ inputs.tap }},dhcp=${{ inputs.calc-address }}/${HOST#*/},gw=${HOST%/*},dns=${{ inputs.dns }}" >> "$GITHUB_OUTPUT"
         if [ "${{ inputs.truststore }}" = true ]; then
           echo "truststore=$RUNNER_TEMP/cemu-net/lwIPCERT.8xv" >> "$GITHUB_OUTPUT"
